@@ -38,8 +38,8 @@ int main(int argc, char* argv[])
 	("h,help", "Prints this help text")
 	("f,field_id", "ID in which the SDF to export is stored.", cxxopts::value<unsigned int>()->default_value("0"))
 	("s,samples", "Number of samples in width direction", cxxopts::value<unsigned int>()->default_value("1024"))
-	("p,plane", "Plane in which the image slice is extracted", cxxopts::value<std::string>()->default_value("xy"))
-	("d,depth", "Relative depth value between -1 and 1 in direction of the axis orthogonal to the plane", cxxopts::value<double>()->default_value("0"))
+	("p,plane", "Plane in which the image slice is extracted", cxxopts::value<std::string>()->default_value("xz"))
+	("d,depth", "Relative depth value between -1 and 1 in direction of the axis orthogonal to the plane", cxxopts::value<double>()->default_value("-1"))
 	("o,output", "Output (in bmp format)", cxxopts::value<std::string>()->default_value(""))
 	("c,colormap", "Color map options: redsequential (rs), green blue inverse diverging (gb) (suitable for visualiztion of signed distance fields)", cxxopts::value<std::string>()->default_value("gb"))
 	("input", "SDF file", cxxopts::value<std::vector<std::string>>())
@@ -56,19 +56,21 @@ int main(int argc, char* argv[])
 			std::cout << std::endl << std::endl << "Example: SDFToBitmap -p xz file.sdf" << std::endl;
 			exit(0);
 		}
-		if (!result.count("input"))
+		/*if (!result.count("input"))
 		{
 			std::cout << "ERROR: No input file given." << std::endl;
 			std::cout << options.help() << std::endl;
 			std::cout << std::endl << std::endl << "Example: SDFToBitmap -p xz file.sdf" << std::endl;
 			exit(1);
-		}
+		}*/
 
 		auto sdf = std::unique_ptr<Discregrid::DiscreteGrid>{};
 
-		auto filename = result["input"].as<std::vector<std::string>>().front();
-		auto lastindex = filename.find_last_of(".");
-		auto extension = filename.substr(lastindex + 1, filename.length() - lastindex);
+		//auto filename = "D:/GritWorld-Shanghai-WorkSpace/Work_Tasks/Feature_SDF/Discregrid/cmd/generate_sdf/resources/bunny.cdf";// result["input"].as<std::vector<std::string>>().front();
+		//auto lastindex = filename.find_last_of(".");
+		auto filename = "D:/GritWorld-Shanghai-WorkSpace/Work_Tasks/Feature_SDF/ModelData/FromBlender/obj/SDFScene/SDFTorus.cdf";
+		//auto filename = "D:/GritWorld-Shanghai-WorkSpace/Work_Tasks/Feature_SDF/Discregrid/cmd/generate_sdf/resources/dragon.cdf";
+		std::string extension = "cdf";//filename.substr(lastindex + 1, filename.length() - lastindex);
 
 		std::cout << "Load SDF...";
 		if (extension == "cdf" || extension == "cdm")
@@ -78,17 +80,17 @@ int main(int argc, char* argv[])
 		}
 		std::cout << "DONE" << std::endl;
 
-		auto depth = result["d"].as<double>();
+		auto depth = 0.75;// result["d"].as<double>();
 		auto const& domain = sdf->domain();
-		auto diag = domain.diagonal().eval();
+		auto diag = domain.diagonal().eval(); //domain extend
 
-		auto plane = result["p"].as<std::string>();
+		/*auto plane = result["p"].as<std::string>();
 		if (plane.length() != 2 && plane[0] != plane[1])
 		{
 			std::cerr << "ERROR: Invalid option for plane provided. Should be one of the following options: xy, xz, yz, yx" << std::endl;
 			exit(1);
-		}
-
+		}*/
+		auto plane = "xz";
 		auto dir = Vector3i::Zero().eval();
 		if (plane[0] == 'y')
 			dir(0) = 1;
@@ -103,11 +105,11 @@ int main(int argc, char* argv[])
 		if (dir(0) != 2 && dir(1) != 2)
 			dir(2) = 2;
 
-		auto xsamples = result["s"].as<unsigned int>();
-		auto ysamples = static_cast<unsigned int>(std::round(diag(dir(1)) / diag(dir(0)) * static_cast<double>(xsamples)));
+		auto xsamples = 50;// result["s"].as<unsigned int>();
+		auto ysamples = 50;// static_cast<unsigned int>(std::round(diag(dir(1)) / diag(dir(0)) * static_cast<double>(xsamples)));
 
-		auto xwidth = diag(dir(0)) / xsamples;
-		auto ywidth = diag(dir(1)) / ysamples;
+		auto xwidth = diag(dir(0)) / xsamples;//slice x
+		auto ywidth = diag(dir(1)) / ysamples;//slice y
 
 		auto data = std::vector<double>{};
 		data.resize(xsamples * ysamples);
@@ -138,6 +140,28 @@ int main(int argc, char* argv[])
 				data[k] = 0.0;
 			}
 		}
+		/*for (int i = 0; i < static_cast<int>(xsamples); i++)
+		{
+		for (int j = 0; j < static_cast<int>(ysamples); ++j)
+		{
+			auto xr = static_cast<double>(i) / static_cast<double>(xsamples);
+			auto yr = static_cast<double>(j) / static_cast<double>(ysamples);
+
+			auto x = domain.min()(dir(0)) + xr * diag(dir(0)) + 0.5 * xwidth;
+			auto y = domain.min()(dir(1)) + yr * diag(dir(1)) + 0.5 * ywidth;
+
+			auto sample = Vector3d{};
+			sample(dir(0)) = x;
+			sample(dir(1)) = y;
+			sample(dir(2)) = domain.min()(dir(2)) + 0.5 * (1.0 + depth) * diag(dir(2));
+			int k = i * ysamples + j;
+			data[k] = sdf->interpolate(field_id, sample);
+			if (data[k] == std::numeric_limits<double>::max())
+			{
+				data[k] = 0.0;
+			}
+		}
+		}*/
 
 		std::cout << "DONE" << std::endl;
 
@@ -159,7 +183,7 @@ int main(int argc, char* argv[])
 		std::cout << "Ouput file: " << out_file << std::endl;
 
 		std::cout << "Export BMP...";
-		std::transform(data.begin(), data.end(), data.begin(), [&max_v, &min_v](double v) {return v >= 0.0 ? v / std::abs(max_v) : v / std::abs(min_v); });
+		std::transform(data.begin(), data.end(), data.begin(), [&max_v, &min_v](double v) {return v >= 0.0 ? v / std::abs(max_v) : v/std::abs(min_v); });//normalize
 
 		auto pixels = std::vector<std::array<unsigned char, 3u>>(data.size());
 

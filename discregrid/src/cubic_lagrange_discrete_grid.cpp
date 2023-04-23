@@ -718,6 +718,561 @@ void CubicLagrangeDiscreteGrid::save(std::string const &filename) const
 	out.close();
 }
 
+void CubicLagrangeDiscreteGrid::saveSDF(std::string const& filename) const
+{
+	auto out = std::ofstream(filename, std::ios::binary);
+	serialize::write(*out.rdbuf(), m_domain);
+	serialize::write(*out.rdbuf(), m_resolution);
+	//serialize::write(*out.rdbuf(), m_cell_size);
+	//serialize::write(*out.rdbuf(), m_inv_cell_size);
+	//serialize::write(*out.rdbuf(), m_n_cells);
+	//serialize::write(*out.rdbuf(), m_n_fields);
+
+	serialize::write(*out.rdbuf(), m_nodes.size());
+	for (auto const& nodes : m_nodes)
+	{
+		serialize::write(*out.rdbuf(), nodes.size());
+		for (auto const& node : nodes)
+		{
+			serialize::write(*out.rdbuf(), node);
+		}
+	}
+
+	/*serialize::write(*out.rdbuf(), m_cells.size());
+	for (auto const& cells : m_cells)
+	{
+		serialize::write(*out.rdbuf(), cells.size());
+		for (auto const& cell : cells)
+		{
+			serialize::write(*out.rdbuf(), cell);
+		}
+	}
+
+	serialize::write(*out.rdbuf(), m_cell_map.size());
+	for (auto const& maps : m_cell_map)
+	{
+		serialize::write(*out.rdbuf(), maps.size());
+		for (auto const& map : maps)
+		{
+			serialize::write(*out.rdbuf(), map);
+		}
+	}*/
+
+	out.close();
+}
+
+void CubicLagrangeDiscreteGrid::CalculateSDFBuffer()
+{
+	m_SDFTexBuffer.clear();
+	//fectch Volume buffer
+	auto xsamples = m_resolution[0];// m_resolution[0];
+	auto ysamples = m_resolution[1];// m_resolution[1];
+	auto zsamples = m_resolution[2];// m_resolution[2];
+
+	auto diag = m_domain.diagonal().eval(); //domain extend
+	auto plane = "xy";//xy,yx,xz,
+	auto dir = Vector3i::Zero().eval();
+	if (plane[0] == 'y')
+		dir(0) = 1;
+	else if (plane[0] == 'z')
+		dir(0) = 2;
+	if (plane[1] == 'y')
+		dir(1) = 1;
+	else if (plane[1] == 'z')
+		dir(1) = 2;
+	if (dir(0) != 1 && dir(1) != 1)
+		dir(2) = 1;
+	if (dir(0) != 2 && dir(1) != 2)
+		dir(2) = 2;
+
+	auto xwidth = diag(dir(0)) / xsamples;
+	auto ywidth = diag(dir(1)) / ysamples;
+	auto zwidth = diag(dir(2)) / zsamples;
+
+	m_SDFTexBuffer.resize(xsamples * ysamples * zsamples);
+
+	auto n_cells = xsamples * ysamples * zsamples;
+#pragma omp parallel for
+//	for (int i = 0; i < xsamples; i++)
+//	{
+//		int xOffset = i * ysamples * zsamples;
+//		for (int j = 0; j < ysamples; j++)
+//		{
+//			int yOffset = j * zsamples;
+//			for (int k = 0; k < zsamples; k++)
+//			{
+//				auto zr = static_cast<double>(k) / static_cast<double>(zsamples);
+//				auto yr = static_cast<double>(j) / static_cast<double>(ysamples);
+//				auto xr = static_cast<double>(i) / static_cast<double>(xsamples);
+//
+//				/*auto x = m_domain.min()(dir(0)) + xr * diag(dir(0)) + 0.5 * xwidth;
+//				auto y = m_domain.min()(dir(1)) + yr * diag(dir(1)) + 0.5 * ywidth;
+//				auto z = m_domain.min()(dir(2)) + zr * diag(dir(2)) + 0.5 * zwidth;*/
+//
+//				auto x = m_domain.min()(dir(0)) + xr * diag(dir(0)) + xwidth;
+//				auto y = m_domain.min()(dir(1)) + yr * diag(dir(1)) + ywidth;
+//				auto z = m_domain.min()(dir(2)) + zr * diag(dir(2)) + zwidth;
+//
+//				auto sample = Vector3d{};
+//				sample(dir(0)) = x;
+//				sample(dir(1)) = y;
+//				sample(dir(2)) = z;
+//
+//				int index = k + yOffset + xOffset;
+//				auto dist = interpolate(0u, sample);
+//				m_SDFTexBuffer[index] = dist;
+//				if (m_SDFTexBuffer[index] == std::numeric_limits<double>::max())
+//				{
+//					m_SDFTexBuffer[index] = 10000.0;
+//				}
+//			}
+//		}
+//	}
+
+	for (int zk = 0; zk < zsamples; zk++)
+	{
+		int zOffset = zk * ysamples * xsamples;
+		for (int yj = 0; yj < ysamples; yj++)
+		{
+			int yOffset = yj * xsamples;
+			for (int xi = 0; xi < xsamples; xi++)
+			{
+				auto xr = static_cast<double>(xi) / static_cast<double>(xsamples);
+				auto yr = static_cast<double>(yj) / static_cast<double>(ysamples);
+				auto zr = static_cast<double>(zk) / static_cast<double>(zsamples);
+
+				/*auto x = m_domain.min()(dir(0)) + xr * diag(dir(0)) + 0.5 * xwidth;
+				auto y = m_domain.min()(dir(1)) + yr * diag(dir(1)) + 0.5 * ywidth;
+				auto z = m_domain.min()(dir(2)) + zr * diag(dir(2)) + 0.5 * zwidth;*/
+
+				auto x = m_domain.min()(dir(0)) + xr * diag(dir(0)) + xwidth;
+				auto y = m_domain.min()(dir(1)) + yr * diag(dir(1)) + ywidth;
+				auto z = m_domain.min()(dir(2)) + zr * diag(dir(2)) + zwidth;
+
+				auto sample = Vector3d{};
+				sample(dir(0)) = x;
+				sample(dir(1)) = y;
+				sample(dir(2)) = z;
+
+				int index = xi + yOffset + zOffset;
+				auto dist = interpolate(0u, sample);
+				m_SDFTexBuffer[index] = dist;
+				if (m_SDFTexBuffer[index] == std::numeric_limits<double>::max())
+				{
+					m_SDFTexBuffer[index] = 10000.0;
+				}
+			}
+		}
+	}
+
+	/*for (auto l = 0u; l < n_cells; ++l)
+	{
+		auto k = l / (ysamples * xsamples);
+		auto temp = l % (ysamples * xsamples);
+		auto j = temp / xsamples;
+		auto i = temp % xsamples;
+
+		auto xr = static_cast<double>(i) / static_cast<double>(xsamples);
+		auto yr = static_cast<double>(j) / static_cast<double>(ysamples);
+		auto zr = static_cast<double>(k) / static_cast<double>(zsamples);
+
+		auto x = m_domain.min()(dir(0)) + xr * diag(dir(0)) + 0.5 * xwidth;
+		auto y = m_domain.min()(dir(1)) + yr * diag(dir(1)) + 0.5 * ywidth;
+		auto z = m_domain.min()(dir(2)) + zr * diag(dir(2)) + 0.5 * zwidth;
+
+		auto sample = Vector3d{};
+		sample(dir(0)) = x;
+		sample(dir(1)) = y;
+		sample(dir(2)) = z;
+
+		int ll = int(l);
+		m_SDFTexBuffer[ll] = interpolate(0u, sample);
+		if (m_SDFTexBuffer[ll] == std::numeric_limits<double>::max())
+		{
+			m_SDFTexBuffer[ll] = 10000.0;
+		}
+	}*/
+}
+
+void CubicLagrangeDiscreteGrid::saveSDFTexture(std::string const& filename) const
+{
+	auto out = std::ofstream(filename, std::ios::binary);
+	serialize::write(*out.rdbuf(), m_domain);
+	serialize::write(*out.rdbuf(), m_resolution);
+
+	serialize::write(*out.rdbuf(), m_SDFTexBuffer.size());
+	for (auto const& cv : m_SDFTexBuffer)
+	{
+		serialize::write(*out.rdbuf(), cv);
+	}
+
+	out.close();
+}
+
+#define V0 1
+#define V1 0
+#define V2 0
+
+void CubicLagrangeDiscreteGrid::CalculateVolume()
+{
+	m_cellVal.clear();
+	//fectch Volume buffer
+	auto xsamples = m_resolution[0];// m_resolution[0];
+	auto ysamples = m_resolution[1];// m_resolution[1];
+	auto zsamples = m_resolution[2];// m_resolution[2];
+
+	auto diag = m_domain.diagonal().eval(); //domain extend
+
+	auto xwidth = diag(0) / xsamples;
+	auto ywidth = diag(1) / ysamples;
+	auto zwidth = diag(2) / ysamples;
+
+	//m_cellVal.resize(xsamples * ysamples * zsamples);
+	//auto field_id = 0u;
+	std::cout << "CalculateVolume Sample field...";
+	auto field_id = 0u;
+
+#pragma omp parallel for
+	for (int i = 0; i < xsamples; i++)
+	{
+		for (int j = 0; j < ysamples; j++)
+		{
+			for (int k = 0; k < zsamples; k++)
+			{
+				auto id = i * ysamples + j * zsamples + k;
+
+#if V0
+				auto xr = static_cast<double>(i) / static_cast<double>(xsamples);
+				auto yr = static_cast<double>(j) / static_cast<double>(ysamples);
+				auto zr = static_cast<double>(k) / static_cast<double>(zsamples);
+
+				auto x = m_domain.min()(0) + xr * diag(0) + 0.5 * xwidth;
+				auto y = m_domain.min()(1) + yr * diag(1) + 0.5 * ywidth;
+				auto z = m_domain.min()(2) + zr * diag(2) + 0.5 * zwidth;
+				auto sample = Vector3d{ x,y,z };
+				auto dist = interpolate(field_id, sample);
+				if (dist == std::numeric_limits<double>::max())
+				{
+					dist = 10000.0;
+				}
+				m_cellVal.emplace_back(dist);
+#endif // 0
+
+#if V1
+				auto x = m_domain.min()(0) + i * diag(0) + xwidth;
+				auto y = m_domain.min()(1) + j * diag(1) + ywidth;
+				auto z = m_domain.min()(2) + k * diag(2) + zwidth;
+				auto sample = Vector3d{ x,y,z };
+
+				m_cellVal[id] = interpolate(field_id, sample);
+				if (m_cellVal[id] == std::numeric_limits<double>::max())
+				{
+					m_cellVal[id] = 10000.0;
+				}
+#endif // 0
+#if V2
+				auto x = m_domain.min()(0) + i * xwidth;
+				auto y = m_domain.min()(1) + j * ywidth;
+				auto z = m_domain.min()(2) + k * zwidth;
+				auto sample = Vector3d{ x,y,z };
+
+				m_cellVal[id] = interpolate(field_id, sample);
+				if (m_cellVal[id] == std::numeric_limits<double>::max())
+				{
+					m_cellVal[id] = 10000.0;
+				}
+#endif // 0
+			}
+		}
+	}
+	std::cout << "DONE" << std::endl;
+}
+
+void CubicLagrangeDiscreteGrid::CCVolume()
+{
+	m_cellVal.clear();
+	//fectch Volume buffer
+	auto xsamples = m_resolution[0];// m_resolution[0];
+	auto ysamples = m_resolution[1];// m_resolution[1];
+	auto zsamples = m_resolution[2];// m_resolution[2];
+
+	auto diag = m_domain.diagonal().eval(); //domain extend
+	auto plane = "xy";
+	auto dir = Vector3i::Zero().eval();
+	if (plane[0] == 'y')
+		dir(0) = 1;
+	else if (plane[0] == 'z')
+		dir(0) = 2;
+	if (plane[1] == 'y')
+		dir(1) = 1;
+	else if (plane[1] == 'z')
+		dir(1) = 2;
+	if (dir(0) != 1 && dir(1) != 1)
+		dir(2) = 1;
+	if (dir(0) != 2 && dir(1) != 2)
+		dir(2) = 2;
+
+	auto xwidth = diag(dir(0)) / xsamples;
+	auto ywidth = diag(dir(1)) / ysamples;
+	auto zwidth = diag(dir(2)) / zsamples;
+
+	m_cellVal.resize(xsamples * ysamples * zsamples);
+	//auto field_id = 0u;
+	std::cout << "CalculateVolume Sample field...";
+	auto field_id = 0u;
+
+	int count = 0;
+//#pragma omp parallel for
+	for (int k = 0; k < zsamples; k++)
+	{
+		for (int j = 0; j < ysamples; j++)
+		{
+			for (int i = 0; i < xsamples; i++)
+			{
+#if V0
+				auto xr = static_cast<double>(i) / static_cast<double>(xsamples);
+				auto yr = static_cast<double>(j) / static_cast<double>(ysamples);
+				auto zr = static_cast<double>(k) / static_cast<double>(zsamples);
+
+				auto x = m_domain.min()(dir(0)) + xr * diag(dir(0)) + 0.5 * xwidth;
+				auto y = m_domain.min()(dir(1)) + yr * diag(dir(1)) + 0.5 * ywidth;
+				auto z = m_domain.min()(dir(2)) + zr * diag(dir(2)) + 0.5 * zwidth;
+
+				auto sample = Vector3d{};
+				sample(dir(0)) = x;
+				sample(dir(1)) = y;
+				sample(dir(2)) = z;
+
+				auto id = i * ysamples + j * zsamples + k;
+				auto dist = interpolate(field_id, sample);
+				if (dist == std::numeric_limits<double>::max())
+				{
+					dist = 10000.0;
+				}
+
+				m_cellVal[count++] = dist;
+#endif // 0
+
+#if V1
+				auto x = m_domain.min()(0) + i * diag(0) + xwidth;
+				auto y = m_domain.min()(1) + j * diag(1) + ywidth;
+				auto z = m_domain.min()(2) + k * diag(2) + zwidth;
+				auto sample = Vector3d{ x,y,z };
+
+				m_cellVal[id] = interpolate(field_id, sample);
+				if (m_cellVal[id] == std::numeric_limits<double>::max())
+				{
+					m_cellVal[id] = 10000.0;
+				}
+#endif // 0
+#if V2
+				auto x = m_domain.min()(0) + i * xwidth;
+				auto y = m_domain.min()(1) + j * ywidth;
+				auto z = m_domain.min()(2) + k * zwidth;
+				auto sample = Vector3d{ x,y,z };
+
+				m_cellVal[id] = interpolate(field_id, sample);
+				if (m_cellVal[id] == std::numeric_limits<double>::max())
+				{
+					m_cellVal[id] = 10000.0;
+				}
+#endif // 0
+			}
+		}
+	}
+	std::cout << "DONE" << std::endl;
+}
+
+void CubicLagrangeDiscreteGrid::saveVolume2D()
+{
+	auto diag = m_domain.diagonal().eval(); //domain extend
+	auto plane = "yx";
+	auto dir = Vector3i::Zero().eval();
+	if (plane[0] == 'y')
+		dir(0) = 1;
+	else if (plane[0] == 'z')
+		dir(0) = 2;
+	if (plane[1] == 'y')
+		dir(1) = 1;
+	else if (plane[1] == 'z')
+		dir(1) = 2;
+	if (dir(0) != 1 && dir(1) != 1)
+		dir(2) = 1;
+	if (dir(0) != 2 && dir(1) != 2)
+		dir(2) = 2;
+
+	auto xsamples = m_resolution[0];// result["s"].as<unsigned int>();
+	auto ysamples = m_resolution[2];// static_cast<unsigned int>(std::round(diag(dir(1)) / diag(dir(0)) * static_cast<double>(xsamples)));
+
+	auto xwidth = diag(dir(0)) / xsamples;//slice x
+	auto ywidth = diag(dir(1)) / ysamples;//slice y
+
+	//auto data = std::vector<double>{};
+	m_cellVal2.clear();
+	m_cellVal2.resize(xsamples * ysamples);
+
+	auto field_id = 0u;
+
+	std::cout << "Sample field...";
+#pragma omp parallel for
+	for (int k = 0; k < static_cast<int>(xsamples * ysamples); ++k)
+	{
+		auto i = k % xsamples;
+		auto j = k / xsamples;
+
+		auto xr = static_cast<double>(i) / static_cast<double>(xsamples);
+		auto yr = static_cast<double>(j) / static_cast<double>(ysamples);
+
+		auto x = m_domain.min()(dir(0)) + xr * diag(dir(0)) + 0.5 * xwidth;
+		auto y = m_domain.min()(dir(1)) + yr * diag(dir(1)) + 0.5 * ywidth;
+
+		auto sample = Vector3d{};
+		sample(dir(0)) = x;
+		sample(dir(1)) = y;
+		sample(dir(2)) = m_domain.min()(dir(2)) + 0.5 * (1.0 + 0.0) * diag(dir(2));
+
+		m_cellVal2[k] = interpolate(field_id, sample);
+		if (m_cellVal2[k] == std::numeric_limits<double>::max())
+		{
+			m_cellVal2[k] = 0.0;
+		}
+	}
+
+	std::cout << "DONE" << std::endl;
+}
+
+void CubicLagrangeDiscreteGrid::saveCustomerize(std::string const& filename) const
+{
+	auto out = std::ofstream(filename, std::ofstream::binary);
+	/*serialize::write(*out.rdbuf(), m_domain);
+	serialize::write(*out.rdbuf(), m_resolution);*/
+	/*serialize::write(*out.rdbuf(), m_cell_size);
+	serialize::write(*out.rdbuf(), m_inv_cell_size);
+	serialize::write(*out.rdbuf(), m_n_cells);
+	serialize::write(*out.rdbuf(), m_n_fields);
+
+	serialize::write(*out.rdbuf(), m_nodes.size());
+	for (auto const& nodes : m_nodes)
+	{
+		serialize::write(*out.rdbuf(), nodes.size());
+		for (auto const& node : nodes)
+		{
+			serialize::write(*out.rdbuf(), node);
+		}
+	}
+
+	serialize::write(*out.rdbuf(), m_cells.size());
+	for (auto const& cells : m_cells)
+	{
+		serialize::write(*out.rdbuf(), cells.size());
+		for (auto const& cell : cells)
+		{
+			serialize::write(*out.rdbuf(), cell);
+		}
+	}
+
+	serialize::write(*out.rdbuf(), m_cell_map.size());
+	for (auto const& maps : m_cell_map)
+	{
+		serialize::write(*out.rdbuf(), maps.size());
+		for (auto const& map : maps)
+		{
+			serialize::write(*out.rdbuf(), map);
+		}
+	}*/
+
+	//serialize::write(*out.rdbuf(), m_cellVal.size());
+	//serialize::write(*out.rdbuf(), m_cellVal.data());
+	for (auto const& cv : m_cellVal)
+	{
+		//serialize::write(*out.rdbuf(), maps.size());
+		//for (auto const& map : maps)
+		//{
+			serialize::write(*out.rdbuf(), cv);
+		//}
+	}
+
+	////test 2d texture
+	//serialize::write(*out.rdbuf(), 9);
+	//for (int z = 0; z < 3; z++)
+	//{
+	//	for (int y = 0; y < 3; y++)
+	//	{
+	//		auto id = z * 3 + y;
+	//		//pSDFData->mCellTestBufferContent.emplace_back(id * 20);
+	//		serialize::write(*out.rdbuf(), id * 20);
+	//	}
+	//}
+
+	out.close();
+}
+
+void CubicLagrangeDiscreteGrid::saveCustomerize2(std::string const& filename) const
+{
+	auto out = std::ofstream(filename, std::ofstream::binary);
+	serialize::write(*out.rdbuf(), m_domain);
+	serialize::write(*out.rdbuf(), m_resolution);
+	/*serialize::write(*out.rdbuf(), m_cell_size);
+	serialize::write(*out.rdbuf(), m_inv_cell_size);
+	serialize::write(*out.rdbuf(), m_n_cells);
+	serialize::write(*out.rdbuf(), m_n_fields);
+
+	serialize::write(*out.rdbuf(), m_nodes.size());
+	for (auto const& nodes : m_nodes)
+	{
+		serialize::write(*out.rdbuf(), nodes.size());
+		for (auto const& node : nodes)
+		{
+			serialize::write(*out.rdbuf(), node);
+		}
+	}
+
+	serialize::write(*out.rdbuf(), m_cells.size());
+	for (auto const& cells : m_cells)
+	{
+		serialize::write(*out.rdbuf(), cells.size());
+		for (auto const& cell : cells)
+		{
+			serialize::write(*out.rdbuf(), cell);
+		}
+	}
+
+	serialize::write(*out.rdbuf(), m_cell_map.size());
+	for (auto const& maps : m_cell_map)
+	{
+		serialize::write(*out.rdbuf(), maps.size());
+		for (auto const& map : maps)
+		{
+			serialize::write(*out.rdbuf(), map);
+		}
+	}*/
+
+	serialize::write(*out.rdbuf(), m_cellVal2.size());
+	//serialize::write(*out.rdbuf(), m_cellVal.data());
+	for (auto const& cv : m_cellVal2)
+	{
+		//serialize::write(*out.rdbuf(), maps.size());
+		//for (auto const& map : maps)
+		//{
+		serialize::write(*out.rdbuf(), cv);
+		//}
+	}
+
+	////test 2d texture
+	//serialize::write(*out.rdbuf(), 9);
+	//for (int z = 0; z < 3; z++)
+	//{
+	//	for (int y = 0; y < 3; y++)
+	//	{
+	//		auto id = z * 3 + y;
+	//		//pSDFData->mCellTestBufferContent.emplace_back(id * 20);
+	//		serialize::write(*out.rdbuf(), id * 20);
+	//	}
+	//}
+
+	out.close();
+}
+
 void CubicLagrangeDiscreteGrid::load(std::string const &filename)
 {
 	auto in = std::ifstream(filename, std::ios::binary);
@@ -895,6 +1450,11 @@ CubicLagrangeDiscreteGrid::addFunction(ContinuousFunction const &func, bool verb
 		std::cout << "\rConstruction took " << std::setw(15) << static_cast<double>(duration_cast<milliseconds>(high_resolution_clock::now() - t0_construction).count()) / 1000.0 << "s" << std::endl;
 	}
 
+	////CalculateVolume();
+	//CCVolume();
+	//saveVolume2D();
+
+	//CalculateSDFBuffer();
 	return static_cast<unsigned int>(m_n_fields++);
 }
 
@@ -981,7 +1541,8 @@ CubicLagrangeDiscreteGrid::interpolate(unsigned int field_id, Vector3d const &x,
 	if (!m_domain.contains(x))
 		return std::numeric_limits<double>::max();
 
-	auto mi = (x - m_domain.min()).cwiseProduct(m_inv_cell_size).cast<unsigned int>().eval();
+	auto pixel = x - m_domain.min();
+	auto mi = pixel.cwiseProduct(m_inv_cell_size).cast<unsigned int>().eval(); //x to domain space
 	if (mi[0] >= m_resolution[0])
 		mi[0] = m_resolution[0] - 1;
 	if (mi[1] >= m_resolution[1])

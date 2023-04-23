@@ -30,6 +30,11 @@ public:
 	virtual ~DiscreteGrid() = default;
 
 	virtual void save(std::string const& filename) const = 0;
+	virtual void saveCustomerize(std::string const& filename) const = 0;
+	virtual void saveCustomerize2(std::string const& filename) const = 0;
+	virtual void saveSDF(std::string const& filename) const = 0;
+	virtual void saveSDFTexture(std::string const& filename) const = 0;
+
 	virtual void load(std::string const& filename) = 0;
 
 	virtual unsigned int addFunction(ContinuousFunction const& func, bool verbose = false,

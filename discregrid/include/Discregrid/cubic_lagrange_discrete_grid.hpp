@@ -1,6 +1,7 @@
 #pragma once
 
 #include "discrete_grid.hpp"
+#include<set>
 
 namespace Discregrid
 {
@@ -14,6 +15,11 @@ public:
 		std::array<unsigned int, 3> const& resolution);
 
 	void save(std::string const& filename) const override;
+	void saveCustomerize(std::string const& filename) const override;
+	void saveCustomerize2(std::string const& filename) const override;
+	void saveSDF(std::string const& filename) const override;
+	void saveSDFTexture(std::string const& filename) const override;
+
 	void load(std::string const& filename) override;
 
 	unsigned int addFunction(ContinuousFunction const& func, bool verbose = false,
@@ -59,6 +65,12 @@ public:
 	void forEachCell(unsigned int field_id,
 		std::function<void(unsigned int, Eigen::AlignedBox3d const&, unsigned int)> const& cb) const;
 
+	void CalculateVolume();
+	void CCVolume();
+	void saveVolume2D();
+
+	void CalculateSDFBuffer();
+
 private:
 
 	Eigen::Vector3d indexToNodePosition(unsigned int l) const;
@@ -69,6 +81,13 @@ private:
 	std::vector<std::vector<double>> m_nodes;
 	std::vector<std::vector<std::array<unsigned int, 32>>> m_cells;
 	std::vector<std::vector<unsigned int>> m_cell_map;
+	std::vector<float> m_cellVal;
+	std::vector<double> m_cellVal2;
+
+	std::vector<double> m_SDFTexBuffer;
+
+	std::set<std::vector<double>> m_index_InterPixel;
+
 };
 
 }

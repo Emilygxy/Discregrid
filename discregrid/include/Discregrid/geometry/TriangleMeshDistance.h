@@ -129,6 +129,7 @@ namespace Discregrid
 		void _construct();
 		void _build_tree(const int node_id, BoundingSphere& bounding_sphere, std::vector<Triangle> &triangles, const int begin, const int end);
 		void _query(Result &result, const Node &node, const Vec3d& point) const;
+		void getBoundingSphere(BoundingSphere& bs, const std::vector<Vec3d>& vertices);
 
 	public:
 
@@ -440,9 +441,87 @@ inline void Discregrid::TriangleMeshDistance::_construct()
 	this->is_constructed = true;
 }
 
+inline void Discregrid::TriangleMeshDistance::getBoundingSphere(BoundingSphere& bs, const std::vector<Vec3d>& vertices)
+{
+	//https://blog.51cto.com/u_15076209/4176846
+	unsigned int maxX = 0, maxY = 0, maxZ = 0, minX = -1, minY = -1, minZ = -1;
+	unsigned int vertex_num = vertices.size();
+	//Find the max and min along the x-axie, y-axie, z-axie
+	for (int i = 0; i < vertex_num; i++)
+	{
+		if (vertices[i][0] > maxX) maxX = i;
+		if (vertices[i][0] < minX) minX = i;
+		if (vertices[i][1] > maxY) maxY = i;
+		if (vertices[i][1] < minY) minY = i;
+		if (vertices[i][2] > maxZ) maxZ = i;
+		if (vertices[i][2] < minZ) minZ = i;
+	}// end for
+	
+	float x = 0.0;
+	Vec3d sub1, sub2;
+	sub1[0] = vertices[maxX][0]; sub1[1] = vertices[maxX][1]; sub1[2] = vertices[maxX][2];
+	sub2[0] = vertices[minX][0]; sub2[1] = vertices[minX][1]; sub2[2] = vertices[minX][2];	
+	sub1 = sub1 - sub2;
+	x = sub1.dot(sub1);
+
+	float y = 0.0;
+	sub1[0] = vertices[maxY][0]; sub1[1] = vertices[maxY][1]; sub1[2] = vertices[maxY][2];
+	sub2[0] = vertices[minY][0]; sub2[1] = vertices[minY][1]; sub2[2] = vertices[minY][2];
+	sub1 = sub1 - sub2;
+	y = sub1.dot(sub1);
+
+	float z = 0.0;
+	sub1[0] = vertices[maxZ][0]; sub1[1] = vertices[maxZ][1]; sub1[2] = vertices[maxZ][2];
+	sub2[0] = vertices[minZ][0]; sub2[1] = vertices[minZ][1]; sub2[2] = vertices[minZ][2];
+	sub1 = sub1 - sub2;
+	z = sub1.dot(sub1);
+
+	float dia = 0;
+	int max = maxX, min = minX;
+	if (z > x && z > y)
+	{
+		max = maxZ;
+		min = minZ;
+		dia = z;
+	}
+	else if (y > x && y > z)
+	{
+		max = maxY;
+		min = minY;
+		dia = y;
+	}
+
+	//Compute the center point
+	bs.center[0] = 0.5 * (vertices[max][0] + vertices[min][0]);
+	bs.center[1] = 0.5 * (vertices[max][1] + vertices[min][1]);
+	bs.center[2] = 0.5 * (vertices[max][2] + vertices[min][2]);
+	//Compute the radious
+	bs.radius = 0.5 * sqrt(dia);
+
+	//Fix it
+	for (int i = 0; i < vertex_num; i++)
+	{
+		Vec3d d;
+		d = vertices[i] - bs.center;
+		float dist2 = d.dot(d);;
+
+		if (dist2 > bs.radius * bs.radius)
+		{
+			float dist = sqrt(dist2);
+			float newRadious = (dist + bs.radius) * 0.5;
+			float k = (newRadious - bs.radius) / dist;
+			bs.radius = newRadious;
+			Vec3d temp = d * k;
+			bs.center = bs.center + temp;
+		}// end if
+	}// end for vertex_num
+}
+
 inline void Discregrid::TriangleMeshDistance::_build_tree(const int node_id, BoundingSphere& bounding_sphere, std::vector<Triangle>& triangles, const int begin, const int end)
 {
 	const int n_triangles = end - begin;
+
+	std::vector<Vec3d> vertices;
 
 	if (n_triangles == 0) {
 		std::cout << "DistanceTriangleMesh::_construct error: Empty leave." << std::endl;
@@ -459,6 +538,12 @@ inline void Discregrid::TriangleMeshDistance::_build_tree(const int node_id, Bou
 		const double radius = std::max(std::max((tri.vertices[0] - center).norm(), (tri.vertices[1] - center).norm()), (tri.vertices[2] - center).norm());
 		bounding_sphere.center = center;
 		bounding_sphere.radius = radius;
+
+		/*for (int i = 0; i < 3; i++)
+		{
+			vertices.emplace_back(tri.vertices[i]);
+		}
+		getBoundingSphere(bounding_sphere, vertices);*/
 	}
 	else {
 		// Compute AxisAligned Bounding Box center and largest dimension of all current triangles
@@ -469,6 +554,7 @@ inline void Discregrid::TriangleMeshDistance::_build_tree(const int node_id, Bou
 			for (int vertex_i = 0; vertex_i < 3; vertex_i++) {
 				const Vec3d& p = triangles[tri_i].vertices[vertex_i];
 				center += p;
+				vertices.emplace_back(p);
 
 				for (int coord_i = 0; coord_i < 3; coord_i++) {
 					top[coord_i] = std::max(top[coord_i], p[coord_i]);
@@ -490,6 +576,8 @@ inline void Discregrid::TriangleMeshDistance::_build_tree(const int node_id, Bou
 		bounding_sphere.center = center;
 		bounding_sphere.radius = std::sqrt(radius_sq);
 
+		//getBoundingSphere(bounding_sphere, vertices);
+
 		// Sort the triangles according to their center along the split dimension
 		std::sort(triangles.begin() + begin, triangles.begin() + end,
 			[split_dim](const Triangle& a, const Triangle& b)
@@ -509,6 +597,8 @@ inline void Discregrid::TriangleMeshDistance::_build_tree(const int node_id, Bou
 		this->nodes.push_back(Node());
 		this->_build_tree(this->nodes[node_id].right, this->nodes[node_id].bv_right, triangles, mid, end);
 	}
+
+	vertices.clear();
 }
 
 inline void Discregrid::TriangleMeshDistance::_query(Result& result, const Node& node, const Vec3d& point) const
